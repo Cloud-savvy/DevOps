@@ -42,7 +42,7 @@ pipeline {
     }
     stage('Create a docker image push to DockerHub and delete') {
       steps {
-        withDockerCredentials([credentialsId: 'docker-cred']) {
+        withCredentials([credentialsId: 'docker-cred', usernameVariable: 'DOCKER_UNAME', passwordVariable: 'DOCKER_PW']) {
           script {
             sh '''
             set -e
