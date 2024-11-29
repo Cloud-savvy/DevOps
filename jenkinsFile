@@ -1,0 +1,73 @@
+pipeline {
+  agent any
+  environment {
+    GIT_REPO = 'https://github.com/Cloud-savvy/DevOps.git'
+    DOCKER_REPO = 'https://index.docker.io/v1/'
+    DOCKERHUB_USER_NAME = 'bromaaascripts'
+    ANS_DOCK_HOST = '172.16.33.113'
+    K8S_HOST = '172.16.33.243'
+    DEV_DIR = '/var/lib/jenkins/workspace/DevOps-project'
+  }
+  parameters {
+    string(name: 'DOCKER_TAG', defaultValue: 'LATEST', description: 'docker image tag (e.g., latest, v1.0)')
+    string(name: 'DOCKER_BUILD_ID', defaultValue: '1', description: 'Build Id for docker image')
+  }
+  stages {
+    stage('Pull from GitHub') {
+      steps {
+        git branch: 'main', url: env.GIT_REPO
+      }
+    }
+    stage('Copy files to respective servers') {
+      steps {
+        script {
+          def filesToTransfer = [
+            "Dockerfile": env.ANS_DOCK_HOST,
+            "ansible.yml": env.ANS_DOCK_HOST,
+            "Deployment.yml": env.K8S_HOST,
+            "Service.yml": env.K8S_HOST
+          ]
+          for (file in filesToTransfer) {
+            def fileName = file.key
+            def targetServer = file.value
+            if (fileExists("${env.DEV_DIR}/${fileName}")) {
+              echo "Transferring ${fileName} to ${targetServer}"
+              sh "scp ${env.DEV_DIR}/${fileName} ubuntu@${targetServer}:/home/ubuntu"
+            } else {
+              error("File ${fileName} not found in ${env.DEV_DIR}. Cannot transfer to ${targetServer}")
+            }
+          }
+        }
+      }
+    }
+    stage('Create a Docker image, push to DockerHub, and logout') {
+      steps {
+        withDockerRegistry([credentialsId: 'docker-cred', url: env.DOCKER_REPO]) {
+          script {
+            sh '''
+            set -e
+            ssh ubuntu@${env.ANS_DOCK_HOST} "
+            cd /home/ubuntu && \
+            docker build -t ${env.DOCKERHUB_USER_NAME}/$JOB_NAME:${params.DOCKER_TAG}-${params.DOCKER_BUILD_ID} . && \
+            docker tag ${env.DOCKERHUB_USER_NAME}/$JOB_NAME:${params.DOCKER_TAG}-${params.DOCKER_BUILD_ID} ${env.DOCKERHUB_USER_NAME}/$JOB_NAME:latest && \
+            docker push ${env.DOCKERHUB_USER_NAME}/$JOB_NAME:${params.DOCKER_TAG}-${params.DOCKER_BUILD_ID} && \
+            docker push ${env.DOCKERHUB_USER_NAME}/$JOB_NAME:latest && \
+            docker image prune -af && \
+            docker logout
+            "
+            '''
+          }
+        }
+      }
+    }
+  }
+  post {
+    success {
+      echo 'Build completed successfully.'
+    }
+    failure {
+      echo 'Build failed. Please check the logs for more details.'
+    }
+  }
+}
+
